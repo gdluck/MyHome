@@ -1,0 +1,13 @@
+{
+  "name": "MyHome",
+  "zip_release": false,
+  "filename": "master.zip",
+  "render_readme": true,
+  "country": [
+    "EN",
+    "FR",
+    "NL",
+    "IT"
+  ],
+  "homeassistant": "2024.3.0"
+}
