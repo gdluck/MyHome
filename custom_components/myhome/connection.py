@@ -1,6 +1,7 @@
 """ This module handles TCP connections to the OpenWebNet gateway """
 
 import asyncio
+import socket as _socket
 import hmac
 import hashlib
 import string
@@ -173,18 +174,21 @@ class OWNSession:
     ):
         """Initialize the class
         Arguments:
+        gateway: OpenWebNet gateway instance
+        connection_type: used when logging to identify this session
         logger: instance of logging
-        address: IP address of the OpenWebNet gateway
-        port: TCP port for the connection
-        password: OpenWebNet password
         """
 
         self._gateway = gateway
         self._type = connection_type.lower()
         self._logger = logger
 
+        # annotations for stream reader/writer:
         self._stream_reader: asyncio.StreamReader
         self._stream_writer: asyncio.StreamWriter
+        # init them to None:
+        self._stream_reader = None
+        self._stream_writer = None
 
     @property
     def gateway(self) -> OWNGateway:
@@ -194,13 +198,13 @@ class OWNSession:
     def gateway(self, gateway: OWNGateway) -> None:
         self._gateway = gateway
 
-    @property
-    def password(self) -> str:
-        return str(self._password)
-
-    @password.setter
-    def password(self, password: str) -> None:
-        self._password = password
+    # password is a property inside OWNGateway... right?
+    #@property
+    #def password(self) -> str:
+    #    return str(self._password)
+    #@password.setter
+    #def password(self, password: str) -> None:
+    #    self._password = password
 
     @property
     def logger(self) -> logging.Logger:
@@ -289,6 +293,22 @@ class OWNSession:
                 ) = await asyncio.open_connection(
                     self._gateway.address, self._gateway.port
                 )
+                # Enable TCP keepalive on the underlying socket to sustain long connections
+                try:
+                    sock = self._stream_writer.get_extra_info("socket")
+                    if sock is not None:
+                        sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_KEEPALIVE, 1)
+                        # Linux-specific tuning: faster detection of dead peers
+                        try:
+                            sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPIDLE, 60)
+                            sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPINTVL, 30)
+                            sock.setsockopt(_socket.IPPROTO_TCP, _socket.TCP_KEEPCNT, 4)
+                        except Exception:
+                            # If platform doesn't support these options, ignore
+                            pass
+                except Exception:
+                    # If keepalive setup fails, proceed without it
+                    pass
                 return await self._negotiate()
             except (ConnectionRefusedError, asyncio.IncompleteReadError):
                 self._logger.warning(
@@ -308,14 +328,21 @@ class OWNSession:
                 )
                 await asyncio.sleep(60)
                 retry_count += 1
+            except asyncio.CancelledError:
+                # Propagate cancellation cleanly
+                raise
 
     async def close(self) -> None:
         """Closes the connection to the OpenWebNet gateway"""
-        self._stream_writer.close()
-        await self._stream_writer.wait_closed()
-        self._logger.debug(
-            "%s %s session closed.", self._gateway.log_id, self._type.capitalize()
-        )
+
+        # this method may be invoked on an empty instance of OWNSession, so be robust against Nones:
+        if self._stream_writer is not None:
+            self._stream_writer.close()
+            await self._stream_writer.wait_closed()
+        if self._gateway is not None:
+            self._logger.debug(
+                "%s %s session closed.", self._gateway.log_id, self._type.capitalize()
+            )
 
     async def _negotiate(self) -> dict:
         type_id = 0 if self._type == "command" else 1
@@ -367,6 +394,7 @@ class OWNSession:
                 self._stream_writer.write("*#*0##".encode())
                 await self._stream_writer.drain()
             else:
+                method = "sha"
                 if resulting_message.is_sha_1():
                     # self._logger.debug("%s Detected SHA-1 method.", self._gateway.log_id)
                     method = "sha1"
@@ -428,6 +456,9 @@ class OWNSession:
                                 # )
                                 self._stream_writer.write("*#*1##".encode())
                                 await self._stream_writer.drain()
+                                self._logger.debug(
+                                    "%s Session established successfully.", self._gateway.log_id
+                                )
                             else:
                                 self._logger.error(
                                     "%s Server identity could not be confirmed.",
@@ -482,7 +513,7 @@ class OWNSession:
                     )
                 elif resulting_message.is_ack():
                     self._logger.debug(
-                        "%s %s session established.",
+                        "%s %s session established successfully.",
                         self._gateway.log_id,
                         self._type.capitalize(),
                     )
@@ -497,7 +528,7 @@ class OWNSession:
         elif resulting_message.is_ack():
             # self._logger.debug("%s Reply: `%s`", self._gateway.log_id, resulting_message)
             self._logger.debug(
-                "%s %s session established.",
+                "%s %s session established successfully.",
                 self._gateway.log_id,
                 self._type.capitalize(),
             )
@@ -646,13 +677,22 @@ class OWNEventSession(OWNSession):
         """Acts as an entry point to read messages on the event bus.
         It will read one frame and return it as an OWNMessage object"""
         try:
-            data = await self._stream_reader.readuntil(OWNSession.SEPARATOR)
+            # Use a timeout to detect stalled connections and trigger reconnection
+            data = await asyncio.wait_for(
+                self._stream_reader.readuntil(OWNSession.SEPARATOR), timeout=120
+            )
             _decoded_data = data.decode()
             _message = OWNMessage.parse(_decoded_data)
             return _message if _message else _decoded_data
         except asyncio.IncompleteReadError:
             self._logger.warning(
                 "%s Connection interrupted, reconnecting...", self._gateway.log_id
+            )
+            await self.connect()
+            return None
+        except asyncio.TimeoutError:
+            self._logger.warning(
+                "%s Event session idle timeout, reconnecting...", self._gateway.log_id
             )
             await self.connect()
             return None
@@ -685,49 +725,53 @@ class OWNCommandSession(OWNSession):
         connection = cls(gateway)
         await connection.connect()
 
-    async def send(self, message, is_status_request: bool = False, trial_number: int = 1):
+    async def send(self, message, is_status_request: bool = False, attempt: int = 1):
         """Send the attached message on an existing 'command' connection,
         actively reconnecting it if it had been reset."""
 
         try:
+            # Guard against None writer/reader (disconnected)
+            if self._stream_writer is None or self._stream_reader is None:
+                await self.connect()
 
             self._stream_writer.write(str(message).encode())
             await self._stream_writer.drain()
+            raw_response = await asyncio.wait_for(
+                self._stream_reader.readuntil(OWNSession.SEPARATOR), timeout=10
+            )
+            resulting_message = OWNMessage.parse(raw_response.decode())
 
-            while True:
-                raw_response = await self._stream_reader.readuntil(OWNSession.SEPARATOR)
+            while not isinstance(resulting_message, OWNSignaling):
+                self._logger.debug(
+                    "%s Message `%s` received response `%s`.",
+                    self._gateway.log_id,
+                    message,
+                    resulting_message,
+                )
+                raw_response = await asyncio.wait_for(
+                    self._stream_reader.readuntil(OWNSession.SEPARATOR), timeout=10
+                )
                 resulting_message = OWNMessage.parse(raw_response.decode())
 
-                if isinstance(resulting_message, OWNSignaling):
-                    # We finally got ACK or NACK
-                    if resulting_message.is_nack():
-                        if trial_number > 2:
-                            self._logger.error(
-                                "%s Could not send message `%s`. No more retries.", self._gateway.log_id, message
-                            )
-                            break
-                        else:
-                            self._logger.error(
-                                "%s Could not send message `%s`. Retrying (%d)...", self._gateway.log_id, message,
-                                trial_number
-                            )
-                        return await self.send(message, is_status_request, trial_number + 1)
-                    elif resulting_message.is_ack():
-                        log_message = "%s Message `%s` was successfully sent."
-                        if not is_status_request:
-                            self._logger.info(log_message, self._gateway.log_id, message)
-                        else:
-                            self._logger.debug(log_message, self._gateway.log_id, message)
-                    break
-                else:
-                    # We've encountered some different reply. Typical for heating queries which follow with burst of messages
-                    self._logger.debug(
-                        "%s Got non-signaling message `%s`.",
-                        self._gateway.log_id,
-                        resulting_message,
+            if resulting_message.is_nack():
+                if attempt <= 2:
+                    self._logger.error(
+                        "%s Could not send message `%s`. Retrying (%d)...", self._gateway.log_id, message,
+                        attempt
                     )
-
-        except (ConnectionResetError, asyncio.IncompleteReadError):
+                    return await self.send(message, is_status_request, attempt + 1)
+                else:
+                    self._logger.error(
+                        "%s Could not send message `%s`. No more retries.", self._gateway.log_id, message
+                    )
+            elif resulting_message.is_ack():
+                log_message = "%s Message `%s` was successfully sent."
+                if not is_status_request:
+                    self._logger.info(log_message, self._gateway.log_id, message)
+                else:
+                    self._logger.debug(log_message, self._gateway.log_id, message)
+                    
+        except (ConnectionResetError, asyncio.IncompleteReadError, asyncio.TimeoutError):
             self._logger.debug(
                 "%s Command session connection reset, retrying...", self._gateway.log_id
             )
