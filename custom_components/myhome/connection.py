@@ -679,7 +679,7 @@ class OWNEventSession(OWNSession):
         try:
             # Use a timeout to detect stalled connections and trigger reconnection
             data = await asyncio.wait_for(
-                self._stream_reader.readuntil(OWNSession.SEPARATOR), timeout=120
+                self._stream_reader.readuntil(OWNSession.SEPARATOR), timeout=300
             )
             _decoded_data = data.decode()
             _message = OWNMessage.parse(_decoded_data)
@@ -703,7 +703,12 @@ class OWNEventSession(OWNSession):
             )
             return None
         except ConnectionError:
-            self._logger.exception("%s Connection error:", self._gateway.log_id)
+            self._logger.error(
+                "%s Connection error, attempting to reconnect...", self._gateway.log_id
+            )
+            await self.close()
+            await asyncio.sleep(5)
+            await self.connect()
             return None
         except Exception:  # pylint: disable=broad-except
             self._logger.exception("%s Event session crashed.", self._gateway.log_id)
@@ -780,3 +785,4 @@ class OWNCommandSession(OWNSession):
         except Exception:  # pylint: disable=broad-except
             self._logger.exception("%s Command session crashed.", self._gateway.log_id)
             return None
+
