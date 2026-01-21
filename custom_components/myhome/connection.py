@@ -334,11 +334,16 @@ class OWNSession:
 
     async def close(self) -> None:
         """Closes the connection to the OpenWebNet gateway"""
-
         # this method may be invoked on an empty instance of OWNSession, so be robust against Nones:
-        if self._stream_writer is not None:
-            self._stream_writer.close()
-            await self._stream_writer.wait_closed()
+        try:
+            if self._stream_writer is not None:
+                await self._stream_writer.drain()
+                self._stream_writer.close()
+                await asyncio.wait_for(self._stream_writer.wait_closed(), timeout=5.0)
+        except asyncio.TimeoutError:
+            if self._stream_writer.transport:
+                self._stream_writer.transport.close()
+
         if self._gateway is not None:
             self._logger.debug(
                 "%s %s session closed.", self._gateway.log_id, self._type.capitalize()
@@ -785,4 +790,5 @@ class OWNCommandSession(OWNSession):
         except Exception:  # pylint: disable=broad-except
             self._logger.exception("%s Command session crashed.", self._gateway.log_id)
             return None
+
 
