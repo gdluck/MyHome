@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from .discovery import find_gateways, get_gateway, get_port
 from .message import OWNMessage, OWNSignaling
 
+CONNECT_TIMEOUT = 20.0  # seconds; fail fast if TCP connect stalls
 
 class OWNGateway:
     def __init__(self, discovery_info: dict):
@@ -242,13 +243,14 @@ class OWNSession:
                 (
                     self._stream_reader,
                     self._stream_writer,
-                ) = await asyncio.open_connection(
-                    self._gateway.address, self._gateway.port
+                ) = await asyncio.wait_for(
+                    asyncio.open_connection(self._gateway.address, self._gateway.port),
+                    timeout=CONNECT_TIMEOUT,
                 )
                 break
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, asyncio.TimeoutError):
                 self._logger.warning(
-                    "%s Test session connection refused, retrying in %ss.",
+                    "%s Test session connection failed (refused/timeout), retrying in %ss.",
                     self._gateway.log_id,
                     retry_timer,
                 )
@@ -290,8 +292,9 @@ class OWNSession:
                 (
                     self._stream_reader,
                     self._stream_writer,
-                ) = await asyncio.open_connection(
-                    self._gateway.address, self._gateway.port
+                ) = await asyncio.wait_for(
+                    asyncio.open_connection(self._gateway.address, self._gateway.port),
+                    timeout=CONNECT_TIMEOUT,
                 )
                 # Enable TCP keepalive on the underlying socket to sustain long connections
                 try:
@@ -310,9 +313,9 @@ class OWNSession:
                     # If keepalive setup fails, proceed without it
                     pass
                 return await self._negotiate()
-            except (ConnectionRefusedError, asyncio.IncompleteReadError):
+            except (ConnectionRefusedError, asyncio.TimeoutError, asyncio.IncompleteReadError):
                 self._logger.warning(
-                    "%s %s session connection refused, retrying in %ss.",
+                    "%s %s session connection refused/timeout, retrying in %ss.",
                     self._gateway.log_id,
                     self._type.capitalize(),
                     retry_timer,
