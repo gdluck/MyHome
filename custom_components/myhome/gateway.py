@@ -1,6 +1,8 @@
 """Code to handle a MyHome Gateway"""
+from __future__ import annotations
+
 import asyncio
-from typing import Dict, List
+from typing import Any
 
 from homeassistant.const import (
     CONF_ENTITIES,
@@ -95,8 +97,8 @@ class MyHOMEGatewayHandler:
         self._terminate_listener = False
         self._terminate_sender = False
         self.is_connected = False
-        self.listening_worker: asyncio.tasks.Task = None
-        self.sending_workers: List[asyncio.tasks.Task] = []
+        self.listening_worker: asyncio.Task | None = None
+        self.sending_workers: list[asyncio.Task] = []
         self.send_buffer = asyncio.Queue()
 
     @property
@@ -127,7 +129,7 @@ class MyHOMEGatewayHandler:
     def firmware(self) -> str:
         return self.gateway.firmware
 
-    async def test(self) -> Dict:
+    async def test(self) -> dict[str, Any]:
         return await OWNSession(gateway=self.gateway, logger=LOGGER).test_connection()
 
     async def listening_loop(self):
@@ -163,43 +165,25 @@ class MyHOMEGatewayHandler:
                     message,
                 )
             elif isinstance(message, OWNEnergyEvent):
-                if SENSOR in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS] and message.entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][SENSOR]:
-                    for _entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][SENSOR][message.entity][CONF_ENTITIES]:
-                        if isinstance(
-                            self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][SENSOR][message.entity][CONF_ENTITIES][_entity],
-                            MyHOMEEntity,
-                        ):
-                            try:
-                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][SENSOR][message.entity][CONF_ENTITIES][_entity].handle_event(message)
-                            except:
-                                LOGGER.error(
-                                    "%s Error handling sensor event `%s`",
-                                    self.log_id,
-                                    message,
-                                )
-                elif BINARY_SENSOR in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS] and message.entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][BINARY_SENSOR]:
-                    for _entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][BINARY_SENSOR][message.entity][CONF_ENTITIES]:
-                        if isinstance(
-                            self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][BINARY_SENSOR][message.entity][CONF_ENTITIES][_entity],
-                            MyHOMEEntity,
-                        ):
-                            try:
-                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][BINARY_SENSOR][message.entity][CONF_ENTITIES][_entity].handle_event(message)
-                            except:
-                                LOGGER.error(
-                                    "%s Error handling binary sensor event `%s`",
-                                    self.log_id,
-                                    message,
-                                )
+                _platforms = self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS]
+                for _target_platform, _error_label in ((SENSOR, "sensor"), (BINARY_SENSOR, "binary sensor")):
+                    if _target_platform in _platforms and message.entity in _platforms[_target_platform]:
+                        _entity_configs = _platforms[_target_platform][message.entity][CONF_ENTITIES]
+                        for _entity_obj in _entity_configs.values():
+                            if isinstance(_entity_obj, MyHOMEEntity):
+                                try:
+                                    _entity_obj.handle_event(message)
+                                except Exception:
+                                    LOGGER.error(
+                                        "%s Error handling %s event `%s`",
+                                        self.log_id,
+                                        _error_label,
+                                        message,
+                                    )
+                        break
                 else:
                     continue
-            elif (
-                isinstance(message, OWNLightingEvent)
-                or isinstance(message, OWNAutomationEvent)
-                or isinstance(message, OWNDryContactEvent)
-                or isinstance(message, OWNAuxEvent)
-                or isinstance(message, OWNHeatingEvent)
-            ):
+            elif isinstance(message, (OWNLightingEvent, OWNAutomationEvent, OWNDryContactEvent, OWNAuxEvent, OWNHeatingEvent)):
                 if not message.is_translation:
                     is_event = False
                     if isinstance(message, OWNLightingEvent):
@@ -282,33 +266,20 @@ class MyHOMEGatewayHandler:
                                 },
                             )
                     if not is_event:
+                        _platforms = self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS]
                         if isinstance(message, OWNLightingEvent) and message.brightness_preset:
-                            if message.entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][LIGHT] and isinstance(
-                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][LIGHT][message.entity][CONF_ENTITIES][LIGHT],
-                                MyHOMEEntity,
-                            ):
-                                await self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][LIGHT][message.entity][CONF_ENTITIES][LIGHT].async_update()
+                            if message.entity in _platforms.get(LIGHT, {}):
+                                _entity_obj = _platforms[LIGHT][message.entity][CONF_ENTITIES][LIGHT]
+                                if isinstance(_entity_obj, MyHOMEEntity):
+                                    await _entity_obj.async_update()
                         else:
-                            for _platform in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS]:
-                                if _platform != BUTTON and message.entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform]:
-                                    for _entity in self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform][message.entity][CONF_ENTITIES]:
-                                        if (
-                                            isinstance(
-                                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform][message.entity][CONF_ENTITIES][_entity],
-                                                MyHOMEEntity,
-                                            )
-                                            and not isinstance(
-                                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform][message.entity][CONF_ENTITIES][_entity],
-                                                DisableCommandButtonEntity,
-                                            )
-                                            and not isinstance(
-                                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform][message.entity][CONF_ENTITIES][_entity],
-                                                EnableCommandButtonEntity,
-                                            )
-                                        ):
+                            for _platform, _platform_devices in _platforms.items():
+                                if _platform != BUTTON and message.entity in _platform_devices:
+                                    for _entity_obj in _platform_devices[message.entity][CONF_ENTITIES].values():
+                                        if isinstance(_entity_obj, MyHOMEEntity) and not isinstance(_entity_obj, (DisableCommandButtonEntity, EnableCommandButtonEntity)):
                                             try:
-                                                self.hass.data[DOMAIN][self.mac][CONF_PLATFORMS][_platform][message.entity][CONF_ENTITIES][_entity].handle_event(message)
-                                            except:
+                                                _entity_obj.handle_event(message)
+                                            except Exception:
                                                 LOGGER.error(
                                                     "%s Error handling event `%s`",
                                                     self.log_id,
@@ -377,7 +348,7 @@ class MyHOMEGatewayHandler:
                     self.log_id,
                     message.human_readable_log,
                 )
-            elif isinstance(message, OWNGatewayEvent) or isinstance(message, OWNGatewayCommand):
+            elif isinstance(message, (OWNGatewayEvent, OWNGatewayCommand)):
                 LOGGER.info(
                     "%s %s",
                     self.log_id,
