@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import datetime
 import re
-from typing import Optional
-
 from dateutil.relativedelta import relativedelta
 import pytz
 
@@ -21,7 +19,7 @@ MESSAGE_TYPE_MAIN_HUMIDITY = "main_humidity"
 MESSAGE_TYPE_SECONDARY_TEMPERATURE = "secondary_temperature"
 MESSAGE_TYPE_TARGET_TEMPERATURE = "target_temperature"
 MESSAGE_TYPE_LOCAL_OFFSET = "local_offset"
-MESSAGE_TYPE_LOCAL_TARGET_TEMPERATURE = "local_targer_temperature"
+MESSAGE_TYPE_LOCAL_TARGET_TEMPERATURE = "local_target_temperature"
 MESSAGE_TYPE_MODE = "hvac_mode"
 MESSAGE_TYPE_MODE_TARGET = "hvac_mode_target"
 MESSAGE_TYPE_ACTION = "hvac_action"
@@ -155,7 +153,7 @@ class OWNMessage:
             del self._dimension_value[0]
 
     @classmethod
-    def parse(cls, data) -> Optional[OWNMessage]:
+    def parse(cls, data) -> OWNMessage | None:
         if (
             cls._ACK.match(data)
             or cls._NACK.match(data)
@@ -342,7 +340,7 @@ class OWNEvent(OWNMessage):
     """
 
     @classmethod
-    def parse(cls, data) -> Optional[OWNEvent]:
+    def parse(cls, data) -> OWNEvent | None:
         _match = re.match(r"^\*#?(?P<who>\d+)\*.+##$", data)
 
         if _match:
@@ -1257,7 +1255,7 @@ class OWNGatewayEvent(OWNEvent):
             self._month = self._dimension_value[6]
             self._year = self._dimension_value[7]
             self._datetime = datetime.datetime.fromisoformat(
-                f"{self._year}-{self._month}-{self._day}*{self._hour}:{self._minute}:{self._second}{self._timezone}"  # pylint: disable=line-too-long
+                f"{self._year}-{self._month}-{self._day}T{self._hour}:{self._minute}:{self._second}{self._timezone}"  # pylint: disable=line-too-long
             )
             self._human_readable_log = (
                 f"Gateway's internal datetime is: {self._datetime}."
@@ -1329,7 +1327,7 @@ class OWNSceneEvent(OWNEvent):
         elif self._state == 4:
             _status = "disabled"
         else:
-            _status = f"unknonwn ({self._state})"
+            _status = f"unknown ({self._state})"
 
         self._human_readable_log = f"Scene {self._scene} is {_status}."
 
@@ -1371,10 +1369,10 @@ class OWNEnergyEvent(OWNEvent):
         self._sensor = self._where[1:]
         self._active_power = 0
         self._total_consumption = 0
-        self._hourly_consumption = dict()
-        self._daily_consumption = dict()
+        self._hourly_consumption = {}
+        self._daily_consumption = {}
         self._current_day_partial_consumption = 0
-        self._monthly_consumption = dict()
+        self._monthly_consumption = {}
         self._current_month_partial_consumption = 0
 
         if self._dimension is not None:
@@ -1611,7 +1609,7 @@ class OWNCommand(OWNMessage):
     """
 
     @classmethod
-    def parse(cls, data) -> Optional[OWNCommand]:
+    def parse(cls, data) -> OWNCommand | None:
         _match = re.match(r"^\*#?(?P<who>\d+)\*.+##$", data)
 
         if _match:
@@ -1946,7 +1944,7 @@ class OWNGatewayCommand(OWNCommand):
             self._month = self._dimension_value[6]
             self._year = self._dimension_value[7]
             self._datetime = datetime.datetime.fromisoformat(
-                f"{self._year}-{self._month}-{self._day}*{self._hour}:{self._minute}:{self._second}{self._timezone}"  # pylint: disable=line-too-long
+                f"{self._year}-{self._month}-{self._day}T{self._hour}:{self._minute}:{self._second}{self._timezone}"  # pylint: disable=line-too-long
             )
             self._human_readable_log = (
                 f"Gateway broadcasting internal datetime: {self._datetime}."
