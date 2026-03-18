@@ -30,7 +30,7 @@ from .gateway import MyHOMEGatewayHandler
 PLATFORMS = ["light", "switch", "cover", "climate", "binary_sensor", "sensor"]
 
 
-async def async_setup(hass, config):
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the MyHOME component."""
     hass.data[DOMAIN] = {}
 
@@ -42,7 +42,7 @@ async def async_setup(hass, config):
     return False
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if entry.data[CONF_MAC] not in hass.data[DOMAIN]:
         hass.data[DOMAIN][entry.data[CONF_MAC]] = {}
 
@@ -61,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         async with aiofiles.open(_config_file_path, mode="r") as yaml_file:
             _validated_config = config_schema(yaml.safe_load(await yaml_file.read()))
     except FileNotFoundError:
-        LOGGER.error(f"Configartion file '{_config_file_path}' is not present!")
+        LOGGER.error(f"Configuration file '{_config_file_path}' is not present!")
         return False
 
     if entry.data[CONF_MAC] in _validated_config:
@@ -87,7 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             CONF_ENTITY
         ].test()
     except OSError as ose:
-        _gateway_handler = hass.data[DOMAIN].pop(CONF_GATEWAY)
+        _gateway_handler = hass.data[DOMAIN][entry.data[CONF_MAC]].pop(CONF_ENTITY)
         _host = _gateway_handler.gateway.host
         raise ConfigEntryNotReady(
             f"Gateway cannot be reached at {_host}, make sure its address is correct."
@@ -157,13 +157,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
 
     configured_entities = []
 
-    for _platform in hass.data[DOMAIN][entry.data[CONF_MAC]][CONF_PLATFORMS].keys():
-        for _device in hass.data[DOMAIN][entry.data[CONF_MAC]][CONF_PLATFORMS][
-            _platform
-        ].keys():
-            for _entity_name in hass.data[DOMAIN][entry.data[CONF_MAC]][CONF_PLATFORMS][
-                _platform
-            ][_device][CONF_ENTITIES]:
+    _platforms = hass.data[DOMAIN][entry.data[CONF_MAC]][CONF_PLATFORMS]
+    for _platform, _platform_devices in _platforms.items():
+        for _device, _device_config in _platform_devices.items():
+            for _entity_name in _device_config[CONF_ENTITIES]:
                 if _entity_name != _platform:
                     configured_entities.append(
                         f"{entry.data[CONF_MAC]}-{_device}-{_entity_name}"
@@ -180,8 +177,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
             continue
         entities_to_be_removed.append(entity_entry.entity_id)
 
-    for enity_id in entities_to_be_removed:
-        entity_registry.async_remove(enity_id)
+    for entity_id in entities_to_be_removed:
+        entity_registry.async_remove(entity_id)
 
     if gateway_device_entry.id in devices_to_be_removed:
         devices_to_be_removed.remove(gateway_device_entry.id)
@@ -212,7 +209,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
                 return False
             else:
                 gateway = mac
-        timezone = hass.config.as_dict()["time_zone"]
+        timezone = hass.config.time_zone
         if gateway in hass.data[DOMAIN]:
             await hass.data[DOMAIN][gateway][CONF_ENTITY].send(
                 OWNGatewayCommand.set_datetime_to_now(timezone)
@@ -270,7 +267,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     return True
 
 
-async def async_unload_entry(hass, entry):
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
 
     LOGGER.info("Unloading MyHome entry.")
