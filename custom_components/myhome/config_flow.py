@@ -1,6 +1,4 @@
 """Config flow to configure MyHome."""
-
-
 import asyncio
 import ipaddress
 import re
@@ -138,8 +136,6 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
     async def async_step_custom(self, user_input=None, errors={}):  # pylint: disable=dangerous-default-value
         """Handle manual gateway setup."""
 
-
-
         if user_input is not None:
             try:
                 user_input["address"] = str(ipaddress.IPv4Address(user_input["address"]))
@@ -216,8 +212,6 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
         Given a configured gateway, will attempt to connect and negociate a
         dummy event session to validate all parameters.
         """
-
-
         gateway = self.gateway_handler
         assert gateway is not None
 
@@ -286,8 +280,6 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
         Asking user to provide the port on which the gateway is listening.
         """
-
-
         if user_input is not None:
             # Validate user input
             if 1 <= int(user_input[CONF_PORT]) <= 65535:
@@ -315,8 +307,6 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
         Asking user to provide the gateway's password.
         """
-
-
         if user_input is not None:
             # Validate user input
             self.gateway_handler.password = str(user_input[CONF_OWN_PASSWORD])
@@ -461,3 +451,6 @@ class MyhomeOptionsFlowHandler(OptionsFlow):
             ),
             errors=errors,
         )
+
+
+

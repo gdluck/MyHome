@@ -7,6 +7,8 @@ if TYPE_CHECKING:
     from .gateway import MyHOMEGatewayHandler
 
 from homeassistant.helpers.entity import Entity
+from homeassistant.const import CONF_ENTITIES
+
 
 from .const import DOMAIN, CONF_PLATFORMS, CONF_ENTITIES
 

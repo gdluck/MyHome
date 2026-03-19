@@ -7,6 +7,7 @@ import hashlib
 import string
 import random
 import logging
+from typing import Union
 from urllib.parse import urlparse
 
 from .discovery import find_gateways, get_gateway, get_port
@@ -197,6 +198,14 @@ class OWNSession:
     def gateway(self, gateway: OWNGateway) -> None:
         self._gateway = gateway
 
+    # password is a property inside OWNGateway... right?
+    #@property
+    #def password(self) -> str:
+    #    return str(self._password)
+    #@password.setter
+    #def password(self, password: str) -> None:
+    #    self._password = password
+
     @property
     def logger(self) -> logging.Logger:
         return self._logger
@@ -281,14 +290,8 @@ class OWNSession:
                 (
                     self._stream_reader,
                     self._stream_writer,
-                ) = await asyncio.wait_for(
-                    asyncio.open_connection(self._gateway.address, self._gateway.port),
-                    timeout=15,
-                )
-                self._logger.debug(
-                    "%s %s open_connection established.",
-                    self._gateway.log_id,
-                    self._type.capitalize(),
+                ) = await asyncio.open_connection(
+                    self._gateway.address, self._gateway.port
                 )
                 # Enable TCP keepalive on the underlying socket to sustain long connections
                 try:
@@ -317,9 +320,9 @@ class OWNSession:
                 await asyncio.sleep(retry_timer)
                 retry_count += 1
                 retry_timer = retry_count * 2
-            except (ConnectionResetError, asyncio.TimeoutError):
+            except ConnectionResetError:
                 self._logger.warning(
-                    "%s %s session connection reset/timeout, retrying in 60s.",
+                    "%s %s session connection reset, retrying in 60s.",
                     self._gateway.log_id,
                     self._type.capitalize(),
                 )
@@ -331,19 +334,15 @@ class OWNSession:
 
     async def close(self) -> None:
         """Closes the connection to the OpenWebNet gateway"""
-        if self._stream_writer is not None:
-            try:
-                await asyncio.wait_for(self._stream_writer.drain(), timeout=2.0)
-            except Exception:
-                pass
-            try:
+        # this method may be invoked on an empty instance of OWNSession, so be robust against Nones:
+        try:
+            if self._stream_writer is not None:
+                await self._stream_writer.drain()
                 self._stream_writer.close()
                 await asyncio.wait_for(self._stream_writer.wait_closed(), timeout=5.0)
-            except Exception:
-                if self._stream_writer.transport:
-                    self._stream_writer.transport.close()
-            self._stream_reader = None
-            self._stream_writer = None
+        except asyncio.TimeoutError:
+            if self._stream_writer.transport:
+                self._stream_writer.transport.close()
 
         if self._gateway is not None:
             self._logger.debug(
@@ -473,7 +472,7 @@ class OWNSession:
                                 self._stream_writer.write("*#*0##".encode())
                                 await self._stream_writer.drain()
                                 error = True
-                                error_message = "negotiation_error"
+                                error_message = "negociation_error"
                                 self._logger.error(
                                     "%s Error while opening %s session: HMAC authentication failed.",
                                     self._gateway.log_id,
@@ -555,14 +554,14 @@ class OWNSession:
         num2 = 0
         password = int(password)
         if test:
-            self._logger.debug(f"password: {password:08x}")
+            print("password: %08x" % (password))
         for character in nonce:
             if character != "0":
                 if start:
                     num2 = password
                 start = False
             if test:
-                self._logger.debug(f"c: {character} num1: {num1:08x} num2: {num2:08x}")
+                print("c: %s num1: %08x num2: %08x" % (character, num1, num2))
             if character == "1":
                 num1 = (num2 & 0xFFFFFF80) >> 7
                 num2 = num2 << 25
@@ -601,7 +600,7 @@ class OWNSession:
             if character not in "09":
                 num1 |= num2
             if test:
-                self._logger.debug(f"     num1: {num1:08x} num2: {num2:08x}")
+                print("     num1: %08x num2: %08x" % (num1, num2))
             num2 = num1
         return num1
 
@@ -658,10 +657,16 @@ class OWNSession:
             return None
 
     def _int_string_to_hex_string(self, int_string: str) -> str:
-        return "".join(f"{int(int_string[i:i+2]):x}" for i in range(0, len(int_string), 2))
+        hex_string = ""
+        for i in range(0, len(int_string), 2):
+            hex_string += f"{int(int_string[i:i+2]):x}"
+        return hex_string
 
     def _hex_string_to_int_string(self, hex_string: str) -> str:
-        return "".join(f"{int(c, 16):0>2d}" for c in hex_string)
+        int_string = ""
+        for i in range(0, len(hex_string), 1):
+            int_string += f"{int(hex_string[i:i+1], 16):0>2d}"
+        return int_string
 
 
 class OWNEventSession(OWNSession):
@@ -673,7 +678,7 @@ class OWNEventSession(OWNSession):
         connection = cls(gateway)
         await connection.connect()
 
-    async def get_next(self) -> OWNMessage | str | None:
+    async def get_next(self) -> Union[OWNMessage, str, None]:
         """Acts as an entry point to read messages on the event bus.
         It will read one frame and return it as an OWNMessage object"""
         try:

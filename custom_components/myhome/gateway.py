@@ -1,8 +1,6 @@
 """Code to handle a MyHome Gateway"""
-from __future__ import annotations
-
 import asyncio
-from typing import Any
+from typing import Dict, List
 
 from homeassistant.const import (
     CONF_ENTITIES,
@@ -97,8 +95,8 @@ class MyHOMEGatewayHandler:
         self._terminate_listener = False
         self._terminate_sender = False
         self.is_connected = False
-        self.listening_worker: asyncio.Task | None = None
-        self.sending_workers: list[asyncio.Task] = []
+        self.listening_worker: asyncio.tasks.Task = None
+        self.sending_workers: List[asyncio.tasks.Task] = []
         self.send_buffer = asyncio.Queue()
 
     @property
@@ -129,7 +127,7 @@ class MyHOMEGatewayHandler:
     def firmware(self) -> str:
         return self.gateway.firmware
 
-    async def test(self) -> dict[str, Any]:
+    async def test(self) -> Dict:
         return await OWNSession(gateway=self.gateway, logger=LOGGER).test_connection()
 
     async def listening_loop(self):
@@ -195,7 +193,13 @@ class MyHOMEGatewayHandler:
                                 )
                 else:
                     continue
-            elif isinstance(message, (OWNLightingEvent, OWNAutomationEvent, OWNDryContactEvent, OWNAuxEvent, OWNHeatingEvent)):
+            elif (
+                isinstance(message, OWNLightingEvent)
+                or isinstance(message, OWNAutomationEvent)
+                or isinstance(message, OWNDryContactEvent)
+                or isinstance(message, OWNAuxEvent)
+                or isinstance(message, OWNHeatingEvent)
+            ):
                 if not message.is_translation:
                     is_event = False
                     if isinstance(message, OWNLightingEvent):
@@ -373,7 +377,7 @@ class MyHOMEGatewayHandler:
                     self.log_id,
                     message.human_readable_log,
                 )
-            elif isinstance(message, (OWNGatewayEvent, OWNGatewayCommand)):
+            elif isinstance(message, OWNGatewayEvent) or isinstance(message, OWNGatewayCommand):
                 LOGGER.info(
                     "%s %s",
                     self.log_id,

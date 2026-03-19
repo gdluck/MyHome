@@ -77,10 +77,10 @@ class SSDPResponse(SSDPMessage):
 
     def __str__(self):
         """Return complete SSDP response."""
-        lines = []
+        lines = list()
         lines.append(" ".join([self.version, str(self.status_code), self.reason]))
         for header in self.headers:
-            lines.append(f"{header[0]}: {header[1]}")
+            lines.append("%s: %s" % header)
         return "\n".join(lines)
 
 
@@ -102,10 +102,10 @@ class SSDPRequest(SSDPMessage):
 
     def __str__(self):
         """Return complete SSDP request."""
-        lines = []
+        lines = list()
         lines.append(" ".join([self.method, self.uri, self.version]))
         for header in self.headers:
-            lines.append(f"{header[0]}: {header[1]}")
+            lines.append("%s: %s" % header)
         return "\n".join(lines)
 
 
@@ -231,7 +231,7 @@ async def get_port(scpd_location: str) -> int:
 
 async def _get_scpd_details(scpd_location: str) -> dict:
 
-    discovery_info = {}
+    discovery_info = dict()
 
     async with aiohttp.ClientSession() as session:
         scpd_response = await session.get(scpd_location)
@@ -276,7 +276,7 @@ async def _get_scpd_details(scpd_location: str) -> dict:
 
 async def find_gateways() -> list:
 
-    return_list = []
+    return_list = list()
 
     # Start the asyncio loop.
     loop = asyncio.get_running_loop()
