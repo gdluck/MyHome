@@ -1,10 +1,13 @@
-"""Config flow to configure MyHome."""
-from __future__ import annotations
+""Config flow to configure MyHome."""
+
 
 import asyncio
 import ipaddress
 import re
 import os
+from typing import Dict, Optional
+
+import async_timeout
 from voluptuous import (
     Schema,
     Required,
@@ -15,6 +18,7 @@ from voluptuous import (
     IsFile,
 )
 from homeassistant.config_entries import (
+    CONN_CLASS_LOCAL_PUSH,
     ConfigEntry,
     ConfigFlow,
     OptionsFlow,
@@ -61,16 +65,17 @@ class MACAddress:
         self.mac = mac
 
     def __repr__(self) -> str:
-        return ":".join([self.mac[i : i + 2] for i in range(0, 12, 2)])
+        return ":".join(["%s" % (self.mac[i : i + 2]) for i in range(0, 12, 2)])
 
     def __str__(self) -> str:
-        return ":".join([self.mac[i : i + 2] for i in range(0, 12, 2)])
+        return ":".join(["%s" % (self.mac[i : i + 2]) for i in range(0, 12, 2)])
 
 
 class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
     """Handle a MyHome config flow."""
 
     VERSION = 1
+    CONNECTION_CLASS = CONN_CLASS_LOCAL_PUSH
 
     @staticmethod
     @callback
@@ -80,9 +85,9 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         """Initialize the MyHome flow."""
-        self.gateway_handler: OWNGateway | None = None
-        self.discovered_gateways: dict[str, OWNGateway] | None = None
-        self._existing_entry: ConfigEntry | None = None
+        self.gateway_handler: Optional[OWNGateway] = None
+        self.discovered_gateways: Optional[Dict[str, OWNGateway]] = None
+        self._existing_entry: ConfigEntry = None
 
     async def async_step_user(self, user_input=None):
         """Handle a flow initialized by the user."""
@@ -101,7 +106,7 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
             return await self.async_step_test_connection()
 
         try:
-            async with asyncio.timeout(5):
+            with async_timeout.timeout(5):
                 local_gateways = await find_gateways()
         except asyncio.TimeoutError:
             return self.async_abort(reason="discovery_timeout")
@@ -130,10 +135,10 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_custom(self, user_input=None, errors: dict | None = None):
+    async def async_step_custom(self, user_input=None, errors={}):  # pylint: disable=dangerous-default-value
         """Handle manual gateway setup."""
-        if errors is None:
-            errors = {}
+
+
 
         if user_input is not None:
             try:
@@ -147,14 +152,14 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
                 errors["serialNumber"] = "invalid_mac"
 
             if not errors:
-                user_input["ssdp_location"] = None
-                user_input["ssdp_st"] = None
-                user_input["deviceType"] = None
-                user_input["friendlyName"] = None
-                user_input["manufacturer"] = "BTicino S.p.A."
-                user_input["manufacturerURL"] = "http://www.bticino.it"
-                user_input["modelNumber"] = None
-                user_input["UDN"] = None
+                user_input["ssdp_location"] = (None,)
+                user_input["ssdp_st"] = (None,)
+                user_input["deviceType"] = (None,)
+                user_input["friendlyName"] = (None,)
+                user_input["manufacturer"] = ("BTicino S.p.A.",)
+                user_input["manufacturerURL"] = ("http://www.bticino.it",)
+                user_input["modelNumber"] = (None,)
+                user_input["UDN"] = (None,)
                 self.gateway_handler = OWNGateway(user_input)
                 await self.async_set_unique_id(user_input["serialNumber"], raise_on_progress=False)
                 return await self.async_step_test_connection()
@@ -183,7 +188,7 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reauth(self, config: dict | None = None):
+    async def async_step_reauth(self, config: dict = None):
         """Perform reauth upon an authentication error."""
 
         self._existing_entry = await self.async_set_unique_id(config[CONF_MAC])
@@ -205,14 +210,14 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
 
         return await self.async_step_password(errors={CONF_OWN_PASSWORD: "password_error"})
 
-    async def async_step_test_connection(self, user_input=None, errors: dict | None = None):  # pylint: disable=unused-argument
+    async def async_step_test_connection(self, user_input=None, errors={}):  # pylint: disable=unused-argument,dangerous-default-value
         """Testing connection to the OWN Gateway.
 
         Given a configured gateway, will attempt to connect and negociate a
         dummy event session to validate all parameters.
         """
-        if errors is None:
-            errors = {}
+
+
         gateway = self.gateway_handler
         assert gateway is not None
 
@@ -276,13 +281,13 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
             else:
                 return self.async_abort(reason=test_result["Message"])
 
-    async def async_step_port(self, user_input=None, errors: dict | None = None):
+    async def async_step_port(self, user_input=None, errors={}):  # pylint: disable=dangerous-default-value
         """Port information for the gateway is missing.
 
         Asking user to provide the port on which the gateway is listening.
         """
-        if errors is None:
-            errors = {}
+
+
         if user_input is not None:
             # Validate user input
             if 1 <= int(user_input[CONF_PORT]) <= 65535:
@@ -305,13 +310,13 @@ class MyhomeFlowHandler(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_password(self, user_input=None, errors: dict | None = None):
+    async def async_step_password(self, user_input=None, errors={}):  # pylint: disable=dangerous-default-value
         """Password is required to connect the gateway.
 
         Asking user to provide the gateway's password.
         """
-        if errors is None:
-            errors = {}
+
+
         if user_input is not None:
             # Validate user input
             self.gateway_handler.password = str(user_input[CONF_OWN_PASSWORD])
@@ -399,7 +404,7 @@ class MyhomeOptionsFlowHandler(OptionsFlow):
         """Manage the MyHome options."""
         return await self.async_step_user()
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(self, user_input=None, errors={}):  # pylint: disable=dangerous-default-value
         """Manage the MyHome devices options."""
 
         errors = {}
@@ -456,6 +461,3 @@ class MyhomeOptionsFlowHandler(OptionsFlow):
             ),
             errors=errors,
         )
-
-
-
