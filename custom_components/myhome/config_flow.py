@@ -1,4 +1,4 @@
-""Config flow to configure MyHome."""
+"""Config flow to configure MyHome."""
 
 
 import asyncio
