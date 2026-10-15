@@ -1,16 +1,22 @@
 {
   "domain": "myhome",
-  "integration_type": "hub",
   "name": "MyHOME",
-  "version": "0.9.5-gdluck",
+  "after_dependencies": [
+    "frontend",
+    "http",
+    "lovelace"
+  ],
+  "codeowners": [
+    "@anotherjulien",
+    "@GreenGrassBlueOcean"
+  ],
   "config_flow": true,
-  "documentation": "https://github.com/gdluck/MyHome",
-  "issue_tracker": "https://github.com/gdluck/MyHome/issues",
-  "loggers": ["custom_components.myhome"],
+  "documentation": "https://openwebnet-ha.github.io/MyHOME/beta/",
+  "integration_type": "hub",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/OpenWebNet-HA/MyHOME/issues",
   "requirements": [
-    "aiohttp",
-    "pytz",
-    "python-dateutil"
+    "OWNd==2.0.0b11"
   ],
   "ssdp": [
     {
@@ -22,6 +28,21 @@
       "st": "upnp:rootdevice",
       "manufacturer": "BTicino S.p.A.",
       "modelName": "AM4890"
+    },
+    {
+      "st": "upnp:rootdevice",
+      "manufacturer": "BTicino S.p.A.",
+      "modelName": "H4890"
+    },
+    {
+      "st": "upnp:rootdevice",
+      "manufacturer": "BTicino S.p.A.",
+      "modelName": "LN4890"
+    },
+    {
+      "st": "upnp:rootdevice",
+      "manufacturer": "BTicino S.p.A.",
+      "modelName": "LN4890A"
     },
     {
       "st": "upnp:rootdevice",
@@ -69,11 +90,5 @@
       "modelName": "MH201"
     }
   ],
-  "codeowners": [
-    "@anotherjulien"
-  ]
+  "version": "2.0.0b15"
 }
-
-
-
-
